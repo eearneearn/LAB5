@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdio.h"
+#include "string.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,17 +41,34 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* USER CODE BEGIN PV */
-
+uint8_t RxBuffer[20];
+uint8_t TxBuffer[150];
+uint32_t timestamp = 0;
+int Timehz = 0;
+int Num = 0;
+int U = 0;
+int Hz = 0;
+int B1Last = 0;
+enum{
+	Welcomeja, LED_Control, Button_Status
+}state = Welcomeja;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+void UARTDMAConfig();
+void LEDOn();
+void LEDOff();
+void StateMachine();
+void welcome();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -86,9 +104,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  welcome();
+  UARTDMAConfig();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -98,6 +118,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  B1Last = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+	  if((Num%2==1)&&(U>-5)){
+		  LEDOn();
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -164,7 +189,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
+  huart2.Init.BaudRate = 57600;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -178,6 +203,25 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+  /* DMA1_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
 
 }
 
@@ -199,11 +243,11 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  /*Configure GPIO pin : PC13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
@@ -215,7 +259,136 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void welcome(){
+	sprintf((char*)TxBuffer,"Welcome to Menu\r\n---------------\r\n0 : LED Control\r\n1 : Button Status\r\nPlease Select Menu\r\n");
+	HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
+}
 
+void UARTDMAConfig()
+{
+	HAL_UART_Receive_DMA(&huart2, RxBuffer, 1);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(huart == &huart2)
+	{
+		RxBuffer[1] = '\0';
+	  switch(state){
+	  case Welcomeja:
+		  if(RxBuffer[0]==48){
+			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : LED Control\r\nLED Control Menu\r\na : SpeedUp\r\ns : SpeedDown\r\nd : OnOff\r\nx : Back\r\n",RxBuffer);
+			  state = LED_Control;
+		  }
+		  else if (RxBuffer[0]==49){
+			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : Button Status\r\nButton Status Menu\r\nx : Back\r\nB1 : Show Button Status",RxBuffer);
+			  state = Button_Status;
+		  }
+		  else{
+			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : Don't have this menu\r\nPlease select again\r\n",RxBuffer);
+			  state = Welcomeja;
+		  }
+		  break;
+	  case LED_Control:
+		  if(RxBuffer[0] == 97){
+			  if(Num%2==1){
+				  U += 1;
+				  Hz = 5 + U;
+				  sprintf((char*)TxBuffer,"\r\nLED blink with a frequency of %d Hz\r\n",Hz);
+			  }
+			  else if(Num%2==0){
+				  sprintf((char*)TxBuffer,"\r\nLED Off\r\nPlease On LED\r\n");
+			  }
+			  state = LED_Control;
+		  }
+		  else if(RxBuffer[0] == 115){
+			  if(Num%2==1){
+				  U -= 1;
+				  Hz = 5 + U;
+				  if(Hz > 0){
+					  sprintf((char*)TxBuffer,"\r\nLED blink with a frequency of %d Hz\r\n",Hz);
+				  }
+				  else if(Hz <= 0){
+					  U = -5;
+					  LEDOff();
+					  sprintf((char*)TxBuffer,"\r\nThe LED does not blink because the frequency is <= 0\r\nPlease increase the frequency\r\n");
+				  }
+			  }
+			  else if(Num%2==0){
+				  sprintf((char*)TxBuffer,"\r\nLED Off\r\nPlease On LED\r\n");
+			  }
+			  state = LED_Control;
+		  }
+		  else if(RxBuffer[0] == 100){
+			  Num += 1;
+			  if(Num % 2 == 1){
+				  LEDOn();
+				  sprintf((char*)TxBuffer,"\r\nLED On\r\n");
+			  }
+			  else if(Num % 2 == 0){
+				  LEDOff();
+				  sprintf((char*)TxBuffer,"\r\nLED Off\r\n");
+			  }
+			  state = LED_Control;
+		  }
+  		  else if(RxBuffer[0] == 120){
+  			  LEDOff();
+  			  U = 0;
+  			  sprintf((char*)TxBuffer,"\r\nBack to main menu\r\n0 : LED Control\r\n1 : Button Status\r\nPlease Select Menu\r\n");
+  			  state = Welcomeja;
+  		  }
+  		  else{
+  			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : Don't have this menu\r\nPlease select again\r\n",RxBuffer);
+			  state = LED_Control;
+  		  }
+		  break;
+	  case Button_Status:
+		  if(RxBuffer[0] == 120){
+			  sprintf((char*)TxBuffer,"\r\nBack to main menu\r\n0 : LED Control\r\n1 : Button Status\r\nPlease Select Menu\r\n");
+			  state = Welcomeja;
+		  }
+		  else if((B1Last == 0)){
+			  sprintf((char*)TxBuffer,"\r\nThe button is pressed\r\n");
+			  state = Button_Status;
+		  }
+		  else if((HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == 1)&&(B1Last == 0)){
+			  sprintf((char*)TxBuffer,"\r\nThe button is not pressed\r\n");
+			  state = Button_Status;
+		  }
+		  else{
+			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : Don't have this menu\r\nPlease select again\r\n",RxBuffer);
+			  state = Button_Status;
+		  }
+		  break;
+	  }
+//	  B1Last = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+	  HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	if(GPIO_Pin == GPIO_PIN_13)
+	{
+		sprintf((char*)TxBuffer,"\r\nThe button is pressed\r\n");
+		HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
+	}
+}
+
+void LEDOn()
+{
+	if(HAL_GetTick() >= timestamp)
+	{
+		Timehz = 1000/(2*(5+U));
+		timestamp = HAL_GetTick()+ Timehz;
+		HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	}
+}
+
+void LEDOff()
+{
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+}
 /* USER CODE END 4 */
 
 /**
