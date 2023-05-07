@@ -52,7 +52,7 @@ int Timehz = 0;
 int Num = 0;
 int U = 0;
 int Hz = 0;
-int B1Last = 0;
+int CheckB1;
 enum{
 	Welcomeja, LED_Control, Button_Status
 }state = Welcomeja;
@@ -67,7 +67,6 @@ static void MX_USART2_UART_Init(void);
 void UARTDMAConfig();
 void LEDOn();
 void LEDOff();
-void StateMachine();
 void welcome();
 /* USER CODE END PFP */
 
@@ -118,8 +117,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-	  B1Last = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
 	  if((Num%2==1)&&(U>-5)){
 		  LEDOn();
 	  }
@@ -245,7 +242,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
@@ -255,6 +252,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
@@ -281,6 +282,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			  state = LED_Control;
 		  }
 		  else if (RxBuffer[0]==49){
+			  CheckB1 = 1;
 			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : Button Status\r\nButton Status Menu\r\nx : Back\r\nB1 : Show Button Status",RxBuffer);
 			  state = Button_Status;
 		  }
@@ -344,16 +346,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		  break;
 	  case Button_Status:
 		  if(RxBuffer[0] == 120){
+			  CheckB1 = 0;
 			  sprintf((char*)TxBuffer,"\r\nBack to main menu\r\n0 : LED Control\r\n1 : Button Status\r\nPlease Select Menu\r\n");
 			  state = Welcomeja;
-		  }
-		  else if((B1Last == 0)){
-			  sprintf((char*)TxBuffer,"\r\nThe button is pressed\r\n");
-			  state = Button_Status;
-		  }
-		  else if((HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == 1)&&(B1Last == 0)){
-			  sprintf((char*)TxBuffer,"\r\nThe button is not pressed\r\n");
-			  state = Button_Status;
 		  }
 		  else{
 			  sprintf((char*)TxBuffer,"\r\nYou Select Menu %s : Don't have this menu\r\nPlease select again\r\n",RxBuffer);
@@ -361,7 +356,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		  }
 		  break;
 	  }
-//	  B1Last = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
 	  HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
 	}
 }
@@ -370,8 +364,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(GPIO_Pin == GPIO_PIN_13)
 	{
-		sprintf((char*)TxBuffer,"\r\nThe button is pressed\r\n");
-		HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
+		if(CheckB1 == 1){
+			if(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == 0){
+				sprintf((char*)TxBuffer,"\r\nThe button is pressed\r\n");
+				HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
+			}
+			else if(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == 1){
+				sprintf((char*)TxBuffer,"\r\nThe button is not pressed\r\n");
+				HAL_UART_Transmit_DMA(&huart2, TxBuffer, strlen((char*)TxBuffer));
+			}
+		}
 	}
 }
 
